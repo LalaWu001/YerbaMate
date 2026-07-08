@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+dist-electron/
+release/
+node_modules/
+*.spec
+audits/
+data/
+tmp/
+stitch_contractsentinel_desktop_workbench/
+stitch_contractsentinel_desktop_workbench.zip
+examples/external/
