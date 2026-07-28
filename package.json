@@ -1,6 +1,6 @@
 {
-  "name": "contractsentinel-desktop",
-  "version": "0.2.0",
+  "name": "yerbamate-desktop",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -14,14 +14,16 @@
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "lucide-react": "^0.468.0",
-    "vite": "^6.0.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-syntax-highlighter": "^16.1.1",
+    "vite": "^6.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "concurrently": "^9.1.0",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
@@ -29,20 +31,45 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "com.contractsentinel.desktop",
-    "productName": "ContractSentinel",
+    "appId": "com.yerbamate.desktop",
+    "productName": "YerbaMate",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "files": [
       "dist/**",
       "electron/**",
-      "sentinel/**",
-      "main.py",
-      "requirements.txt"
+      "Pic/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "main.py",
+        "to": "backend/main.py"
+      },
+      {
+        "from": "sentinel",
+        "to": "backend/sentinel",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "requirements.txt",
+        "to": "backend/requirements.txt"
+      }
     ],
     "directories": {
       "output": "release"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "Pic/yerbamate.ico"
+    },
+    "nsis": {
+      "installerIcon": "Pic/yerbamate.ico",
+      "uninstallerIcon": "Pic/yerbamate.ico",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "YerbaMate"
     }
   }
 }

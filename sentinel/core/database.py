@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,9 @@ class AuditDatabase:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path = self.path.with_name("contractsentinel.sqlite")
+        if self.path.name == "yerbamate.sqlite" and not self.path.exists() and legacy_path.exists():
+            shutil.copy2(legacy_path, self.path)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()

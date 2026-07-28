@@ -9,7 +9,7 @@ from sentinel.core.manager import AuditManager
 
 
 def run_cli(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="ContractSentinel")
+    parser = argparse.ArgumentParser(prog="YerbaMate")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     audit_parser = subparsers.add_parser("audit", help="Audit a local Solidity project")
@@ -29,12 +29,25 @@ def run_cli(argv: list[str]) -> int:
         action="store_true",
         help="Print machine-readable run metadata",
     )
+    audit_parser.add_argument(
+        "--progress-json",
+        action="store_true",
+        help="Print newline-delimited progress events for desktop IPC",
+    )
 
     args = parser.parse_args(argv)
 
     if args.command == "audit":
         config = AuditConfig.from_file(Path(args.config)) if args.config else AuditConfig.default()
-        manager = AuditManager(workspace_root=Path(args.workspace_root), config=config)
+        def emit_progress(event: dict) -> None:
+            if args.progress_json:
+                print("YM_PROGRESS " + json.dumps(event, ensure_ascii=False), flush=True)
+
+        manager = AuditManager(
+            workspace_root=Path(args.workspace_root),
+            config=config,
+            progress_callback=emit_progress if args.progress_json else None,
+        )
         result = manager.audit(Path(args.project_path))
         if args.json:
             print(

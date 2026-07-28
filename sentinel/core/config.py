@@ -8,10 +8,14 @@ from typing import Any
 
 
 AGENT_NAMES = [
+    "manager",
     "project_analyzer",
     "tool_probe",
     "slither",
     "foundry",
+    "semgrep",
+    "echidna",
+    "aderyn",
     "protocol",
     "business_logic",
     "transaction_logic",
@@ -20,6 +24,14 @@ AGENT_NAMES = [
     "verification",
     "report",
 ]
+
+
+def _normalize_base_url(value: Any) -> str:
+    base = str(value or "").strip().rstrip("/")
+    suffix = "/chat/completions"
+    if base.lower().endswith(suffix):
+        return base[: -len(suffix)]
+    return base
 
 
 @dataclass
@@ -40,6 +52,7 @@ class AgentAIConfig:
     model: str = ""
     temperature: float = 0.2
     max_tokens: int = 2048
+    timeout_seconds: int = 120
     send_source_code: bool = False
     fallback_strategy: str = "rule"
 
@@ -48,7 +61,7 @@ class AgentAIConfig:
 class AuditConfig:
     mode: str = "hybrid-auto"
     analysis_depth: str = "standard"
-    database_path: str = "data/contractsentinel.sqlite"
+    database_path: str = "data/yerbamate.sqlite"
     api_profiles: list[ApiProfile] = field(default_factory=list)
     agent_ai: dict[str, AgentAIConfig] = field(default_factory=dict)
     tools: dict[str, bool] = field(default_factory=dict)
@@ -56,9 +69,11 @@ class AuditConfig:
 
     @classmethod
     def default(cls) -> "AuditConfig":
-        api_key = os.getenv("CONTRACTSENTINEL_API_KEY", "")
-        base_url = os.getenv("CONTRACTSENTINEL_BASE_URL", "")
-        model = os.getenv("CONTRACTSENTINEL_MODEL", "")
+        api_key = os.getenv("YERBAMATE_API_KEY", os.getenv("CONTRACTSENTINEL_API_KEY", "")).strip()
+        base_url = _normalize_base_url(
+            os.getenv("YERBAMATE_BASE_URL", os.getenv("CONTRACTSENTINEL_BASE_URL", ""))
+        )
+        model = os.getenv("YERBAMATE_MODEL", os.getenv("CONTRACTSENTINEL_MODEL", "")).strip()
         profile = ApiProfile(
             base_url=base_url,
             api_key=api_key,
@@ -71,12 +86,17 @@ class AuditConfig:
             "slither": AgentAIConfig(ai_enabled=False),
             "foundry": AgentAIConfig(ai_enabled=False),
             "code_analysis": AgentAIConfig(ai_enabled=False),
-            "verification": AgentAIConfig(ai_enabled=False),
+            "verification": AgentAIConfig(ai_enabled=profile.enabled, model=model),
             "protocol": AgentAIConfig(ai_enabled=profile.enabled, model=model),
             "business_logic": AgentAIConfig(ai_enabled=profile.enabled, model=model),
             "transaction_logic": AgentAIConfig(ai_enabled=profile.enabled, model=model),
             "threat_modeling": AgentAIConfig(ai_enabled=profile.enabled, model=model),
-            "report": AgentAIConfig(ai_enabled=profile.enabled, model=model, max_tokens=4096),
+            "report": AgentAIConfig(
+                ai_enabled=profile.enabled,
+                model=model,
+                max_tokens=4096,
+                fallback_strategy="lead-auditor-opinion",
+            ),
         }
         return cls(
             api_profiles=[profile],
@@ -87,6 +107,8 @@ class AuditConfig:
                 "foundry": True,
                 "echidna": False,
                 "halmos": False,
+                "semgrep": False,
+                "aderyn": False,
             },
             permissions={
                 "save_model_call_logs": True,
@@ -110,9 +132,9 @@ class AuditConfig:
                 id=item.get("id", item.get("name", "default")),
                 name=item.get("name", "Default"),
                 provider=item.get("provider", "openai-compatible"),
-                base_url=item.get("base_url", item.get("baseUrl", "")),
-                api_key=item.get("api_key", item.get("apiKey", "")),
-                default_model=item.get("default_model", item.get("defaultModel", "")),
+                base_url=_normalize_base_url(item.get("base_url", item.get("baseUrl", ""))),
+                api_key=str(item.get("api_key", item.get("apiKey", ""))).strip(),
+                default_model=str(item.get("default_model", item.get("defaultModel", ""))).strip(),
                 enabled=bool(item.get("enabled", False)),
             )
             for item in raw.get("api_profiles", raw.get("apiProfiles", []))
@@ -126,12 +148,15 @@ class AuditConfig:
             agent_ai[name] = AgentAIConfig(
                 ai_enabled=bool(item.get("ai_enabled", item.get("aiEnabled", base.ai_enabled))),
                 api_profile_id=item.get("api_profile_id", item.get("apiProfileId", base.api_profile_id)),
-                model=item.get("model", base.model),
+                model=str(item.get("model", base.model)).strip(),
                 temperature=float(item.get("temperature", base.temperature)),
                 max_tokens=int(item.get("max_tokens", item.get("maxTokens", base.max_tokens))),
+                timeout_seconds=int(item.get("timeout_seconds", item.get("timeoutSeconds", base.timeout_seconds))),
                 send_source_code=bool(item.get("send_source_code", item.get("sendSourceCode", base.send_source_code))),
-                fallback_strategy=item.get("fallback_strategy", item.get("fallbackStrategy", base.fallback_strategy)),
+                fallback_strategy=str(item.get("fallback_strategy", item.get("fallbackStrategy", base.fallback_strategy))).strip(),
             )
+
+        raw_tools = cls._normalize_tools(raw.get("tools", {}))
 
         return cls(
             mode=raw.get("mode", default.mode),
@@ -139,18 +164,37 @@ class AuditConfig:
             database_path=raw.get("database_path", raw.get("databasePath", default.database_path)),
             api_profiles=profiles,
             agent_ai=agent_ai,
-            tools={**default.tools, **raw.get("tools", {})},
+            tools={**default.tools, **raw_tools},
             permissions={**default.permissions, **raw.get("permissions", {})},
         )
+
+    @staticmethod
+    def _normalize_tools(raw_tools: dict[str, Any]) -> dict[str, bool]:
+        aliases = {
+            "builtInRules": "built_in_rules",
+            "built-in-rules": "built_in_rules",
+        }
+        normalized: dict[str, bool] = {}
+        for key, value in raw_tools.items():
+            normalized[aliases.get(key, key)] = bool(value)
+        return normalized
 
     def profile_for_agent(self, agent_name: str) -> ApiProfile | None:
         agent_config = self.agent_ai.get(agent_name)
         if not agent_config:
             return None
         for profile in self.api_profiles:
-            if profile.id == agent_config.api_profile_id and profile.enabled:
+            if profile.id == agent_config.api_profile_id and self._profile_usable(profile, agent_config):
                 return profile
-        return next((profile for profile in self.api_profiles if profile.enabled), None)
+        if agent_config.api_profile_id:
+            return None
+        return next((profile for profile in self.api_profiles if self._profile_usable(profile, agent_config)), None)
+
+    @staticmethod
+    def _profile_usable(profile: ApiProfile, agent_config: AgentAIConfig) -> bool:
+        model = (agent_config.model or profile.default_model).strip()
+        has_auth = bool(profile.api_key.strip()) or profile.provider == "ollama"
+        return bool(profile.enabled and _normalize_base_url(profile.base_url) and model and has_auth)
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -176,6 +220,7 @@ class AuditConfig:
                     "model": config.model,
                     "temperature": config.temperature,
                     "max_tokens": config.max_tokens,
+                    "timeout_seconds": config.timeout_seconds,
                     "send_source_code": config.send_source_code,
                     "fallback_strategy": config.fallback_strategy,
                 }

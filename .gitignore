@@ -14,3 +14,16 @@ tmp/
 stitch_contractsentinel_desktop_workbench/
 stitch_contractsentinel_desktop_workbench.zip
 examples/external/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+promote.txt
+
+# Generated audit output and personal deliverables
+audit_report.html
+*.pptx
+*.docx
+*.pdf
+~$*

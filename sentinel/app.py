@@ -8,10 +8,10 @@ from tkinter import filedialog, messagebox, ttk
 from sentinel.core.manager import AuditManager
 
 
-class ContractSentinelApp(tk.Tk):
+class YerbaMateApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("ContractSentinel Desktop")
+        self.title("YerbaMate Desktop")
         self.geometry("1040x700")
         self.minsize(900, 620)
 
@@ -25,7 +25,7 @@ class ContractSentinelApp(tk.Tk):
         root = ttk.Frame(self, padding=14)
         root.pack(fill=tk.BOTH, expand=True)
 
-        title = ttk.Label(root, text="ContractSentinel", font=("Segoe UI", 20, "bold"))
+        title = ttk.Label(root, text="YerbaMate", font=("Segoe UI", 20, "bold"))
         title.pack(anchor=tk.W)
 
         subtitle = ttk.Label(
@@ -127,5 +127,5 @@ class ContractSentinelApp(tk.Tk):
 
 
 def run_desktop_app() -> None:
-    app = ContractSentinelApp()
+    app = YerbaMateApp()
     app.mainloop()

@@ -52,6 +52,84 @@ class ExternalAnalyzerRunner:
             "test": tests,
         }
 
+    def run_semgrep(self, project_path: Path, output_dir: Path, enabled: bool) -> dict[str, Any]:
+        if not enabled:
+            return {"enabled": False, "available": False, "status": "skipped", "reason": "disabled"}
+        semgrep = find_tool("semgrep")
+        if not semgrep:
+            return {"enabled": True, "available": False, "status": "skipped", "reason": "semgrep not found"}
+
+        output_path = (output_dir / "semgrep_raw.json").resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        command = [semgrep, "scan", "--config", "auto", "--json", "--output", str(output_path), str(project_path.resolve())]
+        result = self._run(command, project_path, timeout_seconds=180)
+        parsed = self._read_json(output_path)
+        return {
+            "enabled": True,
+            "available": True,
+            "status": "completed" if result["returncode"] == 0 else "failed",
+            "command": command,
+            "returncode": result["returncode"],
+            "stdout_preview": result["stdout"][:4000],
+            "stderr_preview": result["stderr"][:4000],
+            "raw_output_path": str(output_path) if output_path.exists() else "",
+            "summary": self._summarize_semgrep(parsed),
+        }
+
+    def run_echidna(self, project_path: Path, output_dir: Path, enabled: bool) -> dict[str, Any]:
+        if not enabled:
+            return {"enabled": False, "available": False, "status": "skipped", "reason": "disabled"}
+        echidna = find_tool("echidna")
+        if not echidna:
+            return {"enabled": True, "available": False, "status": "skipped", "reason": "echidna not found"}
+
+        config_path = self._first_existing(
+            project_path,
+            ["echidna.yaml", "echidna.yml", "crytic.yaml", "crytic.yml"],
+        )
+        if not config_path:
+            return {"enabled": True, "available": True, "status": "skipped", "reason": "echidna config not found"}
+
+        output_path = (output_dir / "echidna_raw.json").resolve()
+        command = [echidna, str(project_path.resolve()), "--config", str(config_path), "--format", "json"]
+        result = self._run(command, project_path, timeout_seconds=300)
+        if result["stdout"]:
+            output_path.write_text(result["stdout"], encoding="utf-8")
+        parsed = self._read_json(output_path)
+        return {
+            "enabled": True,
+            "available": True,
+            "status": "completed" if result["returncode"] == 0 else "failed",
+            "command": command,
+            "returncode": result["returncode"],
+            "stdout_preview": result["stdout"][:4000],
+            "stderr_preview": result["stderr"][:4000],
+            "raw_output_path": str(output_path) if output_path.exists() else "",
+            "summary": self._summarize_echidna(parsed),
+        }
+
+    def run_aderyn(self, project_path: Path, output_dir: Path, enabled: bool) -> dict[str, Any]:
+        if not enabled:
+            return {"enabled": False, "available": False, "status": "skipped", "reason": "disabled"}
+        aderyn = find_tool("aderyn")
+        if not aderyn:
+            return {"enabled": True, "available": False, "status": "skipped", "reason": "aderyn not found"}
+
+        output_path = (output_dir / "aderyn_report.md").resolve()
+        command = [aderyn, str(project_path.resolve()), "--output", str(output_path)]
+        result = self._run(command, project_path, timeout_seconds=180)
+        return {
+            "enabled": True,
+            "available": True,
+            "status": "completed" if result["returncode"] == 0 else "failed",
+            "command": command,
+            "returncode": result["returncode"],
+            "stdout_preview": result["stdout"][:4000],
+            "stderr_preview": result["stderr"][:4000],
+            "raw_output_path": str(output_path) if output_path.exists() else "",
+            "summary": {"report_generated": output_path.exists()},
+        }
+
     @staticmethod
     def _run(command: list[str], cwd: Path, timeout_seconds: int) -> dict[str, Any]:
         try:
@@ -60,6 +138,8 @@ class ExternalAnalyzerRunner:
                 cwd=cwd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout_seconds,
                 check=False,
             )
@@ -101,3 +181,37 @@ class ExternalAnalyzerRunner:
             "severity_counts": severity_counts,
             "top_categories": dict(sorted(categories.items(), key=lambda item: item[1], reverse=True)[:10]),
         }
+
+    @staticmethod
+    def _summarize_semgrep(raw: dict[str, Any]) -> dict[str, Any]:
+        results = raw.get("results", []) if raw else []
+        severity_counts: dict[str, int] = {}
+        rules: dict[str, int] = {}
+        for item in results:
+            extra = item.get("extra", {})
+            severity = extra.get("severity", "Unknown")
+            rule_id = item.get("check_id", "unknown")
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+            rules[rule_id] = rules.get(rule_id, 0) + 1
+        return {
+            "finding_count": len(results),
+            "severity_counts": severity_counts,
+            "top_rules": dict(sorted(rules.items(), key=lambda item: item[1], reverse=True)[:10]),
+        }
+
+    @staticmethod
+    def _summarize_echidna(raw: dict[str, Any]) -> dict[str, Any]:
+        tests = raw.get("tests", []) if raw else []
+        failed = [item for item in tests if item.get("status") not in {"passed", "solved"}]
+        return {
+            "test_count": len(tests),
+            "failed_count": len(failed),
+        }
+
+    @staticmethod
+    def _first_existing(root: Path, names: list[str]) -> Path | None:
+        for name in names:
+            candidate = root / name
+            if candidate.exists():
+                return candidate
+        return None

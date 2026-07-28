@@ -12,6 +12,9 @@ class ToolProbe:
         "forge": ["forge", "--version"],
         "solc": ["solc", "--version"],
         "echidna": ["echidna", "--version"],
+        "semgrep": ["semgrep", "--version"],
+        "aderyn": ["aderyn", "--version"],
+        "halmos": ["halmos", "--version"],
     }
 
     def probe(self, project_path: Path) -> dict:

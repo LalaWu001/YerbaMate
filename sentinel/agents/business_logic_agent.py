@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-
+from sentinel.core.ai_json import ai_status, parse_ai_json
 from sentinel.core.config import AuditConfig
 from sentinel.core.model_adapter import ModelAdapter
 from sentinel.core.models import ProjectSummary
@@ -12,7 +11,7 @@ class BusinessLogicAgent:
         self.model_adapter = model_adapter
         self.config = config
 
-    def analyze(self, protocol_summary: dict, project_summary: ProjectSummary) -> dict:
+    def analyze(self, protocol_summary: dict, project_summary: ProjectSummary, manager_feedback: list[dict] | None = None) -> dict:
         protocol_type = protocol_summary["protocol_type"]
         templates = {
             "Vault": [
@@ -38,6 +37,8 @@ class BusinessLogicAgent:
             }
             for name, description in templates.get(protocol_type, [])
         ]
+        if protocol_type == "Library/Mixed" and manager_feedback:
+            rules = self._module_rules(project_summary)
         if not rules:
             rules.append(
                 {
@@ -46,8 +47,39 @@ class BusinessLogicAgent:
                     "security_relevance": "Missing access control can allow unauthorized state changes.",
                 }
             )
-        result = {"business_rules": rules, "contract_count": len(project_summary.contracts), "ai_enhanced": False}
+        result = {
+            "business_rules": rules,
+            "contract_count": len(project_summary.contracts),
+            "ai_enhanced": False,
+            "summary": f"Generated {len(rules)} local business rule(s) for protocol type {protocol_type}.",
+            "ai_status": ai_status(False),
+        }
+        if manager_feedback:
+            result["manager_feedback_used"] = manager_feedback
         return self._try_ai(protocol_summary, project_summary, result) or result
+
+    @staticmethod
+    def _module_rules(project_summary: ProjectSummary) -> list[dict]:
+        contract_names = {contract.name.lower() for contract in project_summary.contracts}
+        candidates = [
+            ("auth_authorization_is_consistent", "Auth/Owned modules should restrict authority, ownership, and role mutation paths.", ["auth", "owned", "authority"]),
+            ("erc20_supply_accounting_consistency", "ERC20 modules should preserve totalSupply, balances, allowances, and permit domain assumptions.", ["erc20"]),
+            ("erc4626_asset_share_invariants", "ERC4626 vault modules should preserve asset/share conversion and deposit/withdraw limits.", ["erc4626"]),
+            ("nft_approval_and_ownership_consistency", "ERC721/ERC1155 modules should preserve ownership, approvals, safe receiver checks, and operator permissions.", ["erc721", "erc1155"]),
+            ("low_level_transfer_assumptions_are_explicit", "Transfer and deployment utility libraries should document low-level call, return-data, and ETH forwarding assumptions.", ["safetransferlib", "create3", "sstore2"]),
+            ("math_and_string_libraries_are_boundary_checked", "Math/string libraries should be checked for overflow, rounding, memory-safety, and edge-case behavior.", ["fixedpointmathlib", "libstring", "safecastlib"]),
+        ]
+        rules = []
+        for name, description, markers in candidates:
+            if any(any(marker in contract for marker in markers) for contract in contract_names):
+                rules.append(
+                    {
+                        "name": name,
+                        "description": description,
+                        "security_relevance": "Module-specific invariants reduce false positives and make downstream threat modeling more precise.",
+                    }
+                )
+        return rules
 
     def _try_ai(self, protocol_summary: dict, project_summary: ProjectSummary, fallback: dict) -> dict | None:
         if not self.config or not self.model_adapter:
@@ -63,19 +95,23 @@ class BusinessLogicAgent:
             {
                 "protocol_summary": protocol_summary,
                 "contracts": [
-                    {"name": contract.name, "functions": [function.name for function in contract.functions]}
-                    for contract in project_summary.contracts
+                    {"name": contract.name, "functions": [function.name for function in contract.functions[:30]]}
+                    for contract in project_summary.contracts[:40]
                 ],
                 "fallback": fallback,
             },
         )
         if not response.ok:
+            fallback["ai_status"] = ai_status(True, response, False)
             return None
-        try:
-            parsed = json.loads(response.content.strip().strip("`"))
-        except json.JSONDecodeError:
+        parsed, error = parse_ai_json(response.content)
+        if not parsed:
+            fallback["ai_status"] = ai_status(True, response, False, error)
             return None
         if "business_rules" not in parsed:
+            fallback["ai_status"] = ai_status(True, response, False, "AI JSON missing business_rules")
             return None
         parsed["ai_enhanced"] = True
+        parsed["summary"] = parsed.get("summary") or f"AI generated {len(parsed.get('business_rules', []))} business rule(s)."
+        parsed["ai_status"] = ai_status(True, response, True)
         return parsed

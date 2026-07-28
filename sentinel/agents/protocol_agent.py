@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-
+from sentinel.core.ai_json import ai_status, parse_ai_json
 from sentinel.core.config import AuditConfig
 from sentinel.core.model_adapter import ModelAdapter
 from sentinel.core.models import ProjectSummary
@@ -44,6 +43,8 @@ class ProtocolAgent:
                 "evidence": (library_markers[:5] or ["multiple standards"]) + possible_standards,
                 "possible_standards": possible_standards,
                 "ai_enhanced": False,
+                "summary": "Detected a mixed Solidity library/codebase using local protocol heuristics.",
+                "ai_status": ai_status(False),
             }
             ai_result = self._try_ai(summary, result)
             return ai_result or result
@@ -60,6 +61,8 @@ class ProtocolAgent:
             "evidence": evidence,
             "possible_standards": possible_standards,
             "ai_enhanced": False,
+            "summary": f"Detected protocol type {best_protocol} using local keyword and standard heuristics.",
+            "ai_status": ai_status(False),
         }
         ai_result = self._try_ai(summary, result)
         return ai_result or result
@@ -91,11 +94,11 @@ class ProtocolAgent:
             "contracts": [
                 {
                     "name": contract.name,
-                    "functions": [function.name for function in contract.functions],
-                    "events": contract.events,
-                    "state_variables": contract.state_variables,
+                    "functions": [function.name for function in contract.functions[:30]],
+                    "events": contract.events[:15],
+                    "state_variables": contract.state_variables[:20],
                 }
-                for contract in summary.contracts
+                for contract in summary.contracts[:40]
             ],
             "fallback": fallback,
         }
@@ -106,13 +109,17 @@ class ProtocolAgent:
             payload,
         )
         if not response.ok:
+            fallback["ai_status"] = ai_status(True, response, False)
             return None
-        try:
-            parsed = json.loads(response.content.strip().strip("`"))
-        except json.JSONDecodeError:
+        parsed, error = parse_ai_json(response.content)
+        if not parsed:
+            fallback["ai_status"] = ai_status(True, response, False, error)
             return None
         if "protocol_type" not in parsed:
+            fallback["ai_status"] = ai_status(True, response, False, "AI JSON missing protocol_type")
             return None
         parsed["ai_enhanced"] = True
+        parsed["summary"] = parsed.get("summary") or f"AI classified the project as {parsed['protocol_type']}."
+        parsed["ai_status"] = ai_status(True, response, True)
         parsed["fallback_protocol_type"] = fallback["protocol_type"]
         return parsed

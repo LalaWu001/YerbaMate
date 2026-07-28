@@ -1,8 +1,12 @@
-# ContractSentinel Desktop
+# YerbaMate Desktop
 
-ContractSentinel Desktop is a desktop smart contract audit workbench for a self-built audit agent. It follows DeepAgents-style ideas of task planning, sub-agents, tool chains, file artifacts, and memory, but the runtime is implemented locally without LangChain or LangGraph.
+YerbaMate Desktop is a desktop smart contract audit workbench for a self-built audit agent. It follows DeepAgents-style ideas of task planning, sub-agents, tool chains, file artifacts, and memory, but the runtime is implemented locally without LangChain or LangGraph.
 
-The current V6-level demo can run a full local audit pipeline, persist audit history in SQLite, save structured artifacts, generate Markdown and HTML reports, and optionally route each individual Agent through an OpenAI-compatible API.
+The current V6-level demo can run a full local audit pipeline, persist audit history in SQLite, stream each completed stage artifact into the desktop UI, generate Markdown and HTML reports, and optionally route each individual Agent through an OpenAI-compatible API.
+
+The desktop opens on an in-product architecture introduction developed by Yuxuan Wu. After selecting an audit project, the read-only Project Source workspace provides an IDE-style expandable file tree and line-numbered code viewer.
+
+When running `release\win-unpacked\YerbaMate.exe`, new audit reports are stored under `release\audits\<project>-<timestamp>\reports`. Set `YERBAMATE_DATA_DIR` to override the runtime data root.
 
 ## Run
 
@@ -55,6 +59,8 @@ npm run electron:build
 - Verification result classification and generated Foundry test templates.
 - SQLite persistence for audit runs, Agent runs, findings, model calls, and cross-session case memory.
 - Workspace artifacts under `audits\`.
+- Live stage results plus concise AI summaries and recommendations while an audit is running.
+- Bounded, structured model payloads with request-size diagnostics for timeout investigation.
 - Markdown and HTML audit report generation.
 
 ## Next Iterations

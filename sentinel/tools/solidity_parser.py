@@ -14,6 +14,10 @@ FUNCTION_RE = re.compile(
     r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\([^)]*\))\s*([^{};]*)\{",
     re.MULTILINE,
 )
+SPECIAL_FUNCTION_RE = re.compile(
+    r"\b(constructor|receive|fallback)\s*(\([^)]*\))?\s*([^{};]*)\{",
+    re.MULTILINE,
+)
 EVENT_RE = re.compile(r"\bevent\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 MODIFIER_RE = re.compile(r"\bmodifier\s+([A-Za-z_][A-Za-z0-9_]*)\s*")
 IMPORT_RE = re.compile(r"\bimport\s+(?:[^;]*?\s+from\s+)?[\"']([^\"']+)[\"'];")
@@ -145,7 +149,26 @@ class SolidityProjectAnalyzer:
                     selector_hint=self._selector_hint(signature),
                 )
             )
-        return functions
+        for match in SPECIAL_FUNCTION_RE.finditer(block):
+            kind = match.group(1)
+            args = match.group(2) or "()"
+            signature_tail = match.group(3)
+            body = self._extract_body(block, match.end() - 1)
+            modifiers = self._extract_modifiers(signature_tail)
+            visibility = self._extract_visibility(signature_tail)
+            signature = f"{kind}{self._normalize_signature_args(args)}"
+            functions.append(
+                FunctionFact(
+                    name=kind,
+                    visibility=visibility,
+                    modifiers=modifiers,
+                    line=self._line_number(full_source, offset + match.start()),
+                    body=body,
+                    signature=signature,
+                    selector_hint=self._selector_hint(signature),
+                )
+            )
+        return sorted(functions, key=lambda function: function.line)
 
     def _file_fact(self, root: Path, file_path: Path, classification: str, skipped_reason: str = "") -> FileFact:
         source = file_path.read_text(encoding="utf-8", errors="ignore") if not skipped_reason else ""

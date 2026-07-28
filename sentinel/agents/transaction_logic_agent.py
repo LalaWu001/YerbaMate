@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-
+from sentinel.core.ai_json import ai_status, parse_ai_json
 from sentinel.core.config import AuditConfig
 from sentinel.core.model_adapter import ModelAdapter
 from sentinel.core.models import ProjectSummary
@@ -12,7 +11,13 @@ class TransactionLogicAgent:
         self.model_adapter = model_adapter
         self.config = config
 
-    def analyze(self, protocol_summary: dict, project_summary: ProjectSummary, business_rules: dict | None = None) -> dict:
+    def analyze(
+        self,
+        protocol_summary: dict,
+        project_summary: ProjectSummary,
+        business_rules: dict | None = None,
+        manager_feedback: list[dict] | None = None,
+    ) -> dict:
         protocol_type = protocol_summary["protocol_type"]
         production_contracts = self._production_contracts(project_summary)
         function_names = {
@@ -61,6 +66,13 @@ class TransactionLogicAgent:
                 }
             ]
             abnormal = ["swap with stale reserves", "remove liquidity without LP shares"]
+        elif protocol_type == "Library/Mixed" and manager_feedback:
+            flows = self._library_module_flows(production_contracts)
+            abnormal = [
+                "mutate authority or role state as untrusted caller",
+                "invoke low-level transfer helper with non-standard token behavior",
+                "exercise math/string utility boundary values",
+            ]
         else:
             flows = [
                 {
@@ -88,8 +100,49 @@ class TransactionLogicAgent:
                 "excluded_dependency_files": len(project_summary.dependency_files),
             },
             "ai_enhanced": False,
+            "summary": f"Generated {len(available_flows)} local transaction flow group(s) and {len(abnormal)} abnormal path hint(s).",
+            "ai_status": ai_status(False),
         }
+        if manager_feedback:
+            result["manager_feedback_used"] = manager_feedback
         return self._try_ai(protocol_summary, project_summary, business_rules or {}, result) or result
+
+    @staticmethod
+    def _library_module_flows(production_contracts) -> list[dict]:
+        modules = [
+            ("auth_permission_flow", ["setauthority", "transferownership", "setuserrole", "setrolecapability", "cancall"]),
+            ("erc20_allowance_transfer_flow", ["approve", "permit", "transfer", "transferfrom"]),
+            ("erc4626_vault_flow", ["deposit", "mint", "withdraw", "redeem", "converttoassets", "converttoshares"]),
+            ("nft_operator_flow", ["setapprovalforall", "approve", "transferfrom", "safetransferfrom", "ownerof"]),
+            ("low_level_utility_flow", ["safeapprove", "safetransfer", "deploy", "write", "read"]),
+        ]
+        function_names = {
+            function.name.lower()
+            for contract in production_contracts
+            for function in contract.functions
+        }
+        flows = []
+        for name, steps in modules:
+            matched = [step for step in steps if step in function_names]
+            if matched:
+                flows.append(
+                    {
+                        "name": name,
+                        "type": "module_flow",
+                        "steps": steps,
+                        "matched_steps": matched,
+                        "critical_invariants": ["module-specific permissions and state transitions remain consistent"],
+                    }
+                )
+        return flows or [
+            {
+                "name": "library_module_review_flow",
+                "type": "module_flow",
+                "steps": sorted(function_names)[:20],
+                "matched_steps": sorted(function_names)[:20],
+                "critical_invariants": ["review exported library entrypoints by module"],
+            }
+        ]
 
     def _try_ai(self, protocol_summary: dict, project_summary: ProjectSummary, business_rules: dict, fallback: dict) -> dict | None:
         if not self.config or not self.model_adapter:
@@ -104,24 +157,37 @@ class TransactionLogicAgent:
             "Infer normal and abnormal transaction flows. Return JSON with flows and abnormal_paths.",
             {
                 "protocol_summary": protocol_summary,
-                "business_rules": business_rules,
+                "business_rules": {
+                    "business_rules": business_rules.get("business_rules", [])[:20],
+                    "invariants": business_rules.get("invariants", [])[:20],
+                    "summary": business_rules.get("summary", ""),
+                },
                 "functions": [
                     {"contract": contract.name, "function": function.name, "modifiers": function.modifiers}
                     for contract in self._production_contracts(project_summary)
                     for function in contract.functions
-                ],
-                "fallback": fallback,
+                ][:80],
+                "fallback": {
+                    "flows": fallback.get("flows", [])[:12],
+                    "abnormal_paths": fallback.get("abnormal_paths", [])[:20],
+                    "scope": fallback.get("scope", {}),
+                    "summary": fallback.get("summary", ""),
+                },
             },
         )
         if not response.ok:
+            fallback["ai_status"] = ai_status(True, response, False)
             return None
-        try:
-            parsed = json.loads(response.content.strip().strip("`"))
-        except json.JSONDecodeError:
+        parsed, error = parse_ai_json(response.content)
+        if not parsed:
+            fallback["ai_status"] = ai_status(True, response, False, error)
             return None
         if "flows" not in parsed:
+            fallback["ai_status"] = ai_status(True, response, False, "AI JSON missing flows")
             return None
         parsed["ai_enhanced"] = True
+        parsed["summary"] = parsed.get("summary") or f"AI inferred {len(parsed.get('flows', []))} transaction flow group(s)."
+        parsed["ai_status"] = ai_status(True, response, True)
         return parsed
 
     @staticmethod

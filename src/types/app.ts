@@ -1,7 +1,9 @@
 import type { LucideIcon } from "lucide-react";
 
 export type PageId =
+  | "home"
   | "import"
+  | "source"
   | "config"
   | "api"
   | "overview"
@@ -16,6 +18,7 @@ export type PageId =
   | "report-agent"
   | "findings"
   | "artifacts"
+  | "history"
   | "report"
   | "settings";
 
@@ -39,15 +42,6 @@ export type ApiProfile = {
   status: "untested" | "connected" | "failed";
 };
 
-export type ModelRole =
-  | "protocolUnderstanding"
-  | "businessLogic"
-  | "transactionLogic"
-  | "codeExplanation"
-  | "threatModeling"
-  | "verificationPlanning"
-  | "reportWriting";
-
 export type AuditMode = "rule-only" | "llm-assisted" | "hybrid-auto" | "manual-review";
 export type AnalysisDepth = "basic" | "standard" | "deep";
 
@@ -69,7 +63,6 @@ export type AuditConfig = {
       fallbackStrategy: string;
     }
   >;
-  modelRoles: Record<ModelRole, string>;
   temperature: number;
   maxTokens: number;
   timeoutSeconds: number;
